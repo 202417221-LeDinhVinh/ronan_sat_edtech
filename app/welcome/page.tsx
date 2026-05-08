@@ -1,6 +1,6 @@
 "use client";
 
-import { useDeferredValue, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useSession } from "@/lib/auth/client";
 import { CheckCircle2, Cake, LoaderCircle, UserRound } from "lucide-react";
@@ -17,6 +17,8 @@ import {
   normalizeUsername,
 } from "@/lib/userProfile";
 
+const USERNAME_CHECK_DEBOUNCE_MS = 350;
+
 export default function WelcomePage() {
   const router = useRouter();
   const { data: session, status, update } = useSession();
@@ -28,9 +30,9 @@ export default function WelcomePage() {
   const [isUsernameAvailable, setIsUsernameAvailable] = useState(false);
   const [submitMessage, setSubmitMessage] = useState("");
   const [isSaving, setIsSaving] = useState(false);
+  const usernameCheckRequestIdRef = useRef(0);
 
-  const deferredUsername = useDeferredValue(username);
-  const normalizedUsername = useMemo(() => normalizeUsername(deferredUsername), [deferredUsername]);
+  const normalizedUsername = useMemo(() => normalizeUsername(username), [username]);
   const sessionUser = session?.user;
   const hasCompletedProfile = sessionUser?.hasCompletedProfile;
 
@@ -48,10 +50,12 @@ export default function WelcomePage() {
 
   useEffect(() => {
     if (status !== "authenticated") {
+      usernameCheckRequestIdRef.current += 1;
       return;
     }
 
     if (!normalizedUsername) {
+      usernameCheckRequestIdRef.current += 1;
       setAvailabilityMessage("");
       setIsUsernameAvailable(false);
       setIsCheckingUsername(false);
@@ -59,17 +63,21 @@ export default function WelcomePage() {
     }
 
     if (!isValidUsername(normalizedUsername)) {
+      usernameCheckRequestIdRef.current += 1;
       setAvailabilityMessage(USERNAME_REQUIREMENTS);
       setIsUsernameAvailable(false);
       setIsCheckingUsername(false);
       return;
     }
 
-    const controller = new AbortController();
+    const requestId = usernameCheckRequestIdRef.current + 1;
+    usernameCheckRequestIdRef.current = requestId;
+    const isCurrentRequest = () => usernameCheckRequestIdRef.current === requestId;
+    let controller: AbortController | null = null;
+
     const checkUsername = async () => {
       try {
-        setIsUsernameAvailable(false);
-        setIsCheckingUsername(true);
+        controller = new AbortController();
 
         const response = await api.get<{ isAvailable?: boolean; error?: string }>(
           API_PATHS.USER_USERNAME,
@@ -79,6 +87,10 @@ export default function WelcomePage() {
           }
         );
         const payload = response.data;
+
+        if (!isCurrentRequest()) {
+          return;
+        }
 
         if (payload.isAvailable) {
           setAvailabilityMessage("Username is available.");
@@ -96,18 +108,34 @@ export default function WelcomePage() {
         };
 
         if (requestError.name !== "CanceledError" && requestError.code !== "ERR_CANCELED") {
+          if (!isCurrentRequest()) {
+            return;
+          }
+
           setAvailabilityMessage(requestError.response?.data?.error || "Could not check username right now.");
           setIsUsernameAvailable(false);
         }
       } finally {
-        setIsCheckingUsername(false);
+        if (isCurrentRequest()) {
+          setIsCheckingUsername(false);
+        }
       }
     };
 
-    void checkUsername();
+    setIsUsernameAvailable(false);
+    setIsCheckingUsername(true);
+    setAvailabilityMessage("Checking username...");
+
+    const debounceTimeoutId = window.setTimeout(() => {
+      void checkUsername();
+    }, USERNAME_CHECK_DEBOUNCE_MS);
 
     return () => {
-      controller.abort();
+      if (isCurrentRequest()) {
+        usernameCheckRequestIdRef.current += 1;
+      }
+      window.clearTimeout(debounceTimeoutId);
+      controller?.abort();
     };
   }, [normalizedUsername, status]);
 
@@ -117,7 +145,7 @@ export default function WelcomePage() {
 
   const usernameIsValid = isValidUsername(normalizedUsername);
   const birthDateIsValid = isValidBirthDate(birthDate);
-  const canSubmit = usernameIsValid && birthDateIsValid && !isSaving;
+  const canSubmit = usernameIsValid && isUsernameAvailable && birthDateIsValid && !isCheckingUsername && !isSaving;
 
   const getSubmitErrorMessage = (error: unknown) => {
     const responseError = error as {
