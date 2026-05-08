@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "@/lib/auth/server";
 
-import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import {
   USERNAME_REQUIREMENTS,
   isValidUsername,
@@ -24,7 +24,7 @@ export async function GET(req: Request) {
     );
   }
 
-  const supabase = await createSupabaseServerClient();
+  const supabase = createSupabaseAdminClient();
   const { data: existingUser } = await supabase
     .from("profiles")
     .select("id")
