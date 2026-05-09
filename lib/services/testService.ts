@@ -198,8 +198,9 @@ export const testService = {
 
     const rows = (data ?? []) as RawTestRow[];
     const lockedTestIds = await testAccessService.getLockedTestIds(rows.map((test) => test.id));
-    const filtered = rows.filter((test) => matchesPeriod(test.title, filters.period) && matchesSubject(test.test_sections, filters.subject) && (filters.fullLengthOnly ? hasAllFourModules(test.test_sections) : true));
-    const availablePeriods = ["All", ...sortPeriods(Array.from(new Set(rows.map((test) => getTestPeriodLabel(test.title)))))];
+    const subjectFiltered = rows.filter((test) => matchesSubject(test.test_sections, filters.subject) && (filters.fullLengthOnly ? hasAllFourModules(test.test_sections) : true));
+    const availablePeriods = ["All", ...sortPeriods(Array.from(new Set(subjectFiltered.map((test) => getTestPeriodLabel(test.title)))))];
+    const filtered = subjectFiltered.filter((test) => matchesPeriod(test.title, filters.period));
 
     filtered.sort((left, right) => {
       // Bước 1: Tính toán giá trị số đại diện cho Thời gian (Period) của từng bài
